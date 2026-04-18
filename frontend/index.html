@@ -1,0 +1,199 @@
+<html>
+
+	<head>
+		<meta charset="utf8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+		<link rel="stylesheet" href="index.css">
+		<link href="https://fonts.googleapis.com/css?family=Open+Sans|Open+Sans+Condensed:300|Roboto" rel="stylesheet">
+		<link href='https://fonts.googleapis.com/css?family=Ek+Mukta:300' rel='stylesheet' type='text/css'>
+
+		<script type="text/javascript">
+
+			// ============================================================
+			// CONFIGURATION - Update this URL to your deployed backend
+			// ============================================================
+			var API_URL = "http://localhost:8000/saveTaps";
+			// For production (e.g., Railway/Render), change to:
+			// var API_URL = "https://your-backend.onrender.com/saveTaps";
+
+			var totalTouchDuration = 0;
+
+			var tapCounter=0;
+			var startTap=0, endTap=0;
+			var tapSessionStartTime=0;
+			var tapLog="";
+			var tapLogsArray=[];
+
+			//stop after 50 taps or 60 seconds, whichever occurs first
+			var tapLimit = 50;
+			var tapTimeOut = 60; //seconds
+			var uniqueIdentifier=0;
+			var d;
+			var dependentVariable="";
+
+			var showFeedback = false;
+			var interfaceVariations = 2;
+			var interfaceSequence = 1;
+
+			//Called when page finishes loading
+			function onLoad(){
+				var el = document.getElementById('tapHere');
+				d = new Date();
+
+				if(d.getTime()%2 ==0){
+					showFeedback=true;
+				}
+
+				uniqueIdentifier = d.getTime();
+				var randomNumber = Math.floor(Math.random() * 42);
+				uniqueIdentifier=uniqueIdentifier+""+randomNumber;
+
+				//Set mouse and touch listeners
+				["mouseup","mousedown","touchstart","touchend"].forEach(function(te) {
+    			el.addEventListener(te, tapityTap);
+ 				});
+			}
+
+			function saveDependentVariable(dVariable){
+				dependentVariable = dVariable;
+				document.getElementById("buttoncontainer").style.display = "none";
+				document.getElementById("container").style.display = "inline-block";
+			}
+
+			function syncToServer(){
+				// Use Fetch API to POST data to FastAPI backend
+				var params = new URLSearchParams();
+				params.append("id", uniqueIdentifier);
+				params.append("var", dependentVariable);
+				params.append("taps", "[" + tapLogsArray + "]");
+
+				fetch(API_URL, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded"
+					},
+					body: params.toString()
+				})
+				.then(function(response) {
+					return response.text();
+				})
+				.then(function(responseText) {
+					// Remove surrounding quotes from JSON response
+					responseText = responseText.replace(/^"|"$/g, '');
+					if (responseText !== "Data saved successfully") {
+						document.getElementById("container").innerHTML = '<span class="spanWhite">Server error. Please try again.</span>';
+					} else {
+						document.getElementById("container").innerHTML = '<span class="spanWhite">Thank you! Data saved successfully.</span>';
+					}
+				})
+				.catch(function(error) {
+					console.error("Error:", error);
+					document.getElementById("container").innerHTML = '<span class="spanWhite">Server went away. Please try again.</span>';
+				});
+			}
+
+			function tapityTap(tep){
+				d = new Date();
+				var te = tep.type;
+				document.getElementById("action").innerHTML = te;
+				console.log("Ready:"+te);
+
+				switch(te){
+					case "touchstart":
+					tep.preventDefault();
+
+					case "mousedown":
+					startTap = d.getTime();
+					if(tapSessionStartTime==0)
+						tapSessionStartTime = startTap;
+					break;
+
+					case "touchend":
+					tep.preventDefault();
+
+					case "mouseup":
+					endTap = d.getTime();
+					var duration = (endTap - startTap);
+
+					if(startTap ==0 || endTap == 0){
+						tapLog += "<br>Tap #"+tapCounter + "; One of the timestamps is 0.";
+					}else if(startTap>0 && endTap >0 && (startTap > endTap)){
+						// Start timestamp larger than end - skip
+					}else{
+						console.log("Tap #"+tapCounter + "; Tap duration:"+duration +" ms");
+						tapCounter++;
+						totalTouchDuration+=duration;
+						var meanTouchDuration = totalTouchDuration / tapCounter;
+
+						var tap = {};
+						tap["tapSequenceNumber"]=tapCounter;
+						tap["startTimestamp"]=startTap;
+						tap["endTimestamp"]=endTap;
+						tap["interfaceSequence"]=interfaceSequence;
+
+						if(showFeedback)
+							tap["interface"]= "feedbackshown";
+						else
+							tap["interface"]= "nofeedback";
+
+						tapLogsArray.push(JSON.stringify(tap));
+						tapLog += "<br>Tap #"+tapCounter + "; Tap duration:"+duration +" ms";
+
+						if(tapCounter>=tapLimit){
+							interfaceSequence++;
+
+							if(interfaceSequence <= interfaceVariations){
+								document.getElementById("counter").innerHTML = '<span class="spanWhite">Mean tap duration: <span class="spanTime">'+Math.round(meanTouchDuration,2)+'</span> ms</span>';
+								document.getElementById("continue").style.display="block";
+								document.getElementById("tapHere").style.display="none";
+							}else{
+								document.getElementById("counter").innerHTML = '<span class="spanWhite">Mean tap duration: <span class="spanTime">'+Math.round(meanTouchDuration,2)+'</span> ms</span>';
+								document.getElementById("tapHere").style.display="none";
+								syncToServer();
+							}
+							return;
+						}
+
+						if(showFeedback)
+							document.getElementById("counter").innerHTML= "Mean tap duration: <span class='spanTime'>"+Math.round(meanTouchDuration,2)+"</span> ms";
+					}
+
+					startTap = 0;
+					endTap = 0;
+					break;
+				}
+			}
+
+			function startNext(){
+				startTap = 0;
+				endTap = 0;
+				tapCounter = 0;
+				totalTouchDuration = 0;
+				document.getElementById("tapHere").style.display="block";
+				document.getElementById("continue").style.display="none";
+				document.getElementById("counter").innerHTML="";
+				if(showFeedback)
+					showFeedback = false;
+				else
+					showFeedback = true;
+			}
+
+		</script>
+
+	</head>
+
+	<body onLoad="onLoad()">
+		<div>
+			<div id="buttoncontainer">
+				<button type="button" onclick="saveDependentVariable('android')" id="variable1">Android</button>
+				<button type="button" onclick="saveDependentVariable('pc')" id="variable2">PC</button>
+			</div>
+			<div id="container" class="container">
+				<div id="counter"></div>
+				<div id="action"></div>
+				<button id="tapHere"><img src="2x/round_touch_app_white_36dp.png"/></button>
+				<button id="continue" onclick="startNext()">Continue</button>
+			</div>
+		</div>
+	</body>
+</html>
