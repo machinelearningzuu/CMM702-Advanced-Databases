@@ -56,6 +56,64 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/summary")
+def summary():
+    """Live summary of current tap_logs data.
+
+    Returns counts by platform, interface, and interfaceSequence, plus
+    per-session breakdown. Useful for monitoring incoming participant data
+    during the experiment without needing to open the Firebase Console.
+    """
+    try:
+        from collections import defaultdict
+
+        docs = [d.to_dict() for d in db.collection("tap_logs").stream()]
+        if not docs:
+            return {"total_taps": 0, "sessions": 0, "message": "No data yet"}
+
+        by_session = defaultdict(list)
+        for d in docs:
+            by_session[d.get("sessionId", "unknown")].append(d)
+
+        # Per-session breakdown
+        sessions = {}
+        for sid, taps in by_session.items():
+            platforms = sorted({t.get("platform") for t in taps})
+            interfaces = sorted({t.get("interface") for t in taps if t.get("interface")})
+            seqs = sorted({t.get("interfaceSequence") for t in taps if t.get("interfaceSequence")})
+            total_duration = sum(t.get("duration", 0) for t in taps)
+            sessions[sid] = {
+                "tap_count": len(taps),
+                "platforms": platforms,
+                "interfaces": interfaces,
+                "interfaceSequences": seqs,
+                "avg_duration_ms": round(total_duration / len(taps), 1) if taps else 0,
+                "completed_both_variations": len(seqs) >= 2,
+            }
+
+        # Aggregate stats
+        platform_counts = defaultdict(int)
+        interface_counts = defaultdict(int)
+        for d in docs:
+            platform_counts[d.get("platform", "unknown")] += 1
+            interface_counts[d.get("interface", "unknown")] += 1
+
+        completed_both = sum(1 for s in sessions.values() if s["completed_both_variations"])
+
+        return {
+            "total_taps": len(docs),
+            "sessions": len(sessions),
+            "sessions_completed_both_variations": completed_both,
+            "sessions_dropped_off": len(sessions) - completed_both,
+            "tap_counts_by_platform": dict(platform_counts),
+            "tap_counts_by_interface": dict(interface_counts),
+            "per_session": sessions,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Summary failed: %s", exc)
+        return {"error_type": type(exc).__name__, "error_message": str(exc)}
+
+
 @app.get("/diagnostics")
 def diagnostics():
     """Quick sanity check — tries a trivial Firestore operation and reports
