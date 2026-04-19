@@ -56,6 +56,30 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/sample_docs")
+def sample_docs(n: int = 3):
+    """Return N raw Firestore documents exactly as stored in the `tap_logs`
+    collection. Proves the document-per-tap storage model described in the
+    assessment. No aggregation — these are the actual persisted objects."""
+    try:
+        docs = []
+        for doc_snapshot in db.collection("tap_logs").limit(n).stream():
+            d = doc_snapshot.to_dict()
+            # Convert the Firestore timestamp for JSON serialisation
+            if "createdAt" in d and hasattr(d["createdAt"], "isoformat"):
+                d["createdAt"] = d["createdAt"].isoformat()
+            docs.append({"firestore_document_id": doc_snapshot.id, **d})
+        return {
+            "collection": "tap_logs",
+            "note": "Each tap is persisted as its own document (document-per-tap storage model).",
+            "sample_count": len(docs),
+            "documents": docs,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Sample docs failed: %s", exc)
+        return {"error_type": type(exc).__name__, "error_message": str(exc)}
+
+
 @app.get("/analysis")
 def analysis():
     """Run the three Q2 assessment queries against live Firestore data.
