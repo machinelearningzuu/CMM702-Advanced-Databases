@@ -75,20 +75,25 @@
 					body: params.toString()
 				})
 				.then(function(response) {
-					return response.text();
-				})
-				.then(function(responseText) {
-					// Remove surrounding quotes from JSON response
-					responseText = responseText.replace(/^"|"$/g, '');
-					if (responseText !== "Data saved successfully") {
-						document.getElementById("container").innerHTML = '<span class="spanWhite">Server error. Please try again.</span>';
-					} else {
-						document.getElementById("container").innerHTML = '<span class="spanWhite">Thank you! Data saved successfully.</span>';
+					// Treat any 2xx response as success, regardless of body format
+					if (response.ok) {
+						return response.text().then(function(body) {
+							console.log("Save success:", body);
+							document.getElementById("container").innerHTML =
+								'<span class="spanWhite">Thank you! Data saved successfully.</span>';
+						});
 					}
+					// Non-2xx → pull the JSON error detail if any
+					return response.text().then(function(body) {
+						console.error("Save failed:", response.status, body);
+						document.getElementById("container").innerHTML =
+							'<span class="spanWhite">Server error (HTTP ' + response.status + '). Please try again.</span>';
+					});
 				})
 				.catch(function(error) {
-					console.error("Error:", error);
-					document.getElementById("container").innerHTML = '<span class="spanWhite">Server went away. Please try again.</span>';
+					console.error("Network error:", error);
+					document.getElementById("container").innerHTML =
+						'<span class="spanWhite">Server went away. Please try again.</span>';
 				});
 			}
 
