@@ -56,6 +56,85 @@ def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/analysis")
+def analysis():
+    """Run the three Q2 assessment queries against live Firestore data.
+
+    Returns:
+      a) Mean tap duration: Android vs PC (per-tap averages, not session-avg)
+      b) Mean tap duration: feedbackshown vs nofeedback
+      c) Users who completed both interface variations vs dropped off
+    """
+    try:
+        from collections import defaultdict
+
+        docs = [d.to_dict() for d in db.collection("tap_logs").stream()]
+        if not docs:
+            return {"message": "No data yet"}
+
+        # ---- (a) by platform -------------------------------------------------
+        by_platform = defaultdict(list)
+        for d in docs:
+            by_platform[d.get("platform", "unknown")].append(d.get("duration", 0))
+        q_a = {
+            p: {
+                "tap_count": len(vals),
+                "mean_duration_ms": round(sum(vals) / len(vals), 2) if vals else 0,
+                "min_duration_ms": min(vals) if vals else 0,
+                "max_duration_ms": max(vals) if vals else 0,
+            }
+            for p, vals in sorted(by_platform.items())
+        }
+
+        # ---- (b) by interface ------------------------------------------------
+        by_interface = defaultdict(list)
+        for d in docs:
+            by_interface[d.get("interface", "unknown")].append(d.get("duration", 0))
+        q_b = {
+            k: {
+                "tap_count": len(vals),
+                "mean_duration_ms": round(sum(vals) / len(vals), 2) if vals else 0,
+            }
+            for k, vals in sorted(by_interface.items())
+        }
+
+        # ---- (c) sessions completed vs dropped -------------------------------
+        by_session_seqs = defaultdict(set)
+        by_session_tapcount = defaultdict(int)
+        for d in docs:
+            sid = d.get("sessionId", "unknown")
+            by_session_seqs[sid].add(d.get("interfaceSequence"))
+            by_session_tapcount[sid] += 1
+
+        # Only count sessions with a meaningful number of taps (>= 25) as real
+        # participants — this filters out incidental test requests.
+        real_sessions = {
+            sid: seqs for sid, seqs in by_session_seqs.items()
+            if by_session_tapcount[sid] >= 25
+        }
+        completed = sum(1 for seqs in real_sessions.values() if len(seqs) >= 2)
+        dropped = len(real_sessions) - completed
+        q_c = {
+            "completed_both": completed,
+            "dropped_off_after_first": dropped,
+            "completion_rate_pct": (
+                round(100 * completed / len(real_sessions), 1)
+                if real_sessions else 0
+            ),
+            "real_sessions_considered": len(real_sessions),
+        }
+
+        return {
+            "total_documents": len(docs),
+            "query_a_mean_duration_by_platform": q_a,
+            "query_b_mean_duration_by_interface": q_b,
+            "query_c_completion_analysis": q_c,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Analysis failed: %s", exc)
+        return {"error_type": type(exc).__name__, "error_message": str(exc)}
+
+
 @app.get("/summary")
 def summary():
     """Live summary of current tap_logs data.
